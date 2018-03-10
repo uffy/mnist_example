@@ -85,3 +85,17 @@ func LoadTrain(path string) ([][]float64, []float64) {
 
 	return images, labels
 }
+
+func LoadTest(path string) ([][]float64, []float64) {
+	images, _, err := ReadImages(path + "/t10k-images-idx3-ubyte")
+	if err != nil {
+		log.Fatal(err)
+	}
+	labels, _, err := ReadLabels(path + "/t10k-labels-idx1-ubyte")
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return images, labels
+}

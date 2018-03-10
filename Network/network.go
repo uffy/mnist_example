@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"time"
 	"mnist_example/MNISTLoader"
+	"sync"
 )
 
 type Network struct {
@@ -71,6 +72,34 @@ func randWeights(sizes []int) [][][]float64 {
 	return weights
 }
 
+func zeroBiases(sizes []int) [][]float64 {
+	biases := make([][]float64, len(sizes)-1)
+	for n := range biases {
+		biases[n] = make([]float64, sizes[n+1])
+
+		for m := range biases[n] {
+			biases[n][m] = 0
+		}
+	}
+	return biases
+}
+
+func zeroWeights(sizes []int) [][][]float64 {
+	weights := make([][][]float64, len(sizes)-1)
+	for n := range weights {
+		weights[n] = make([][]float64, sizes[n+1])
+
+		for m := range weights[n] {
+			weights[n][m] = make([]float64, sizes[n])
+
+			for j := range weights[n][m] {
+				weights[n][m][j] = 0
+			}
+		}
+	}
+	return weights
+}
+
 func (net *Network) FeedForward(inputs []float64) []float64 {
 	prev := inputs
 	var values []float64
@@ -90,13 +119,10 @@ func (net *Network) FeedForward(inputs []float64) []float64 {
 	return prev
 }
 
-func (net *Network) SGD(trainingData []MNIST, epochs int, miniBatchSize int, eta float64) {
-	n := len(trainingData)
-
+func (net *Network) SGD(trainingData []MNIST, testData []MNIST, epochs int, miniBatchSize int, eta float64) {
 	trainingData = shuffleMNIST(trainingData)
-
-	trainingData = trainingData[0:5000]
-	testData := trainingData[5001:6000]
+	n := len(trainingData)
+	fmt.Printf("traningData: %d, testData: %d\n", len(trainingData), len(testData))
 
 	for j := 0; j < epochs; j++ {
 		for i := 0; i < n; i += miniBatchSize {
@@ -105,56 +131,89 @@ func (net *Network) SGD(trainingData []MNIST, epochs int, miniBatchSize int, eta
 				end = n
 			}
 			net.updateMiniBatch(trainingData[i:end], eta)
-			fmt.Println("total loss: ", net.TotalLoss(trainingData))
 		}
-	}
 
-	success := 0
-	total := 0
-	for _, mnist := range testData {
+		s, t := net.evaluate(testData)
+		fmt.Printf("Epochs %d %d/%d, Total loss: %.2f\n", j, s, t, net.TotalLoss(testData))
+	}
+}
+
+func (net *Network) OnlineSGD(trainingData []MNIST, testData []MNIST, epochs int, miniBatchSize int, eta float64) {
+	trainingData = shuffleMNIST(trainingData)
+
+	for j := 0; j < epochs; j++ {
+		for _, d := range trainingData {
+			w, b := net.Backprop(d.Data, d.matrixValue())
+			for l1 := range net.Weights {
+				for l2 := range net.Weights[l1] {
+					net.Biases[l1][l2] -= b[l1][l2] * eta
+					for l3 := range net.Weights[l1][l2] {
+						net.Weights[l1][l2][l3] -= w[l1][l2][l3] * eta
+					}
+				}
+			}
+			fmt.Println("Total lost: ", net.TotalLoss(testData))
+		}
+
+		net.evaluate(testData)
+	}
+}
+
+func (net *Network) evaluate(data []MNIST) (success int, total int) {
+	for _, mnist := range data {
 		total++
 		a := matrixToInt(net.FeedForward(mnist.Data))
 
 		if a == mnist.Value {
 			success++
 		}
-
-		fmt.Println("total: ", total, "success", success, "percent: ", success*100/total)
 	}
+
+	return success, total
 }
 
 func (net *Network) updateMiniBatch(miniBatch []MNIST, eta float64) {
-	nablaBiases := net.Biases
-	nablaWeights := net.Weights
-	//for l, b := range nablaBiases {
-	//	for j := range b {
-	//		nablaBiases[l][j] = 0
-	//	}
-	//}
-	//for l1, w1 := range nablaWeights {
-	//	for l2, w2 := range w1 {
-	//		for l3 := range w2 {
-	//			nablaWeights[l1][l2][l3] = 0
-	//		}
-	//	}
-	//}
-
-	for _, m := range miniBatch {
-		w, b := net.Backprop(m.Data, m.matrixValue())
-
-		for l1, b1 := range nablaBiases {
-			for l2 := range b1 {
-				nablaBiases[l1][l2] += b[l1][l2]
-			}
+	nablaBiases := zeroBiases(net.Sizes)
+	nablaWeights := zeroWeights(net.Sizes)
+	for l, b := range nablaBiases {
+		for j := range b {
+			nablaBiases[l][j] = 0
 		}
-		for l1, w1 := range nablaWeights {
-			for l2, w2 := range w1 {
-				for l3 := range w2 {
-					nablaWeights[l1][l2][l3] += w[l1][l2][l3]
-				}
+	}
+	for l1, w1 := range nablaWeights {
+		for l2, w2 := range w1 {
+			for l3 := range w2 {
+				nablaWeights[l1][l2][l3] = 0
 			}
 		}
 	}
+
+	wg := sync.WaitGroup{}
+	lock := sync.Mutex{}
+	for _, m := range miniBatch {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			w, b := net.Backprop(m.Data, m.matrixValue())
+
+			lock.Lock()
+			defer lock.Unlock()
+			for l1, b1 := range nablaBiases {
+				for l2 := range b1 {
+					nablaBiases[l1][l2] += b[l1][l2]
+				}
+			}
+			for l1, w1 := range nablaWeights {
+				for l2, w2 := range w1 {
+					for l3 := range w2 {
+						nablaWeights[l1][l2][l3] += w[l1][l2][l3]
+					}
+				}
+			}
+		}()
+	}
+	wg.Wait()
 
 	for l1, b1 := range net.Biases {
 		for l2, b2 := range b1 {
@@ -184,38 +243,22 @@ func (net *Network) TotalLoss(batches []MNIST) float64 {
 }
 
 func (net *Network) Backprop(x []float64, y []float64) ([][][]float64, [][]float64) {
-	var nablaBiases [][]float64
-	for _, l := range net.Biases {
-		nablaBiases = append(
-			nablaBiases,
-			make([]float64, len(l)),
-		)
-	}
-	var nablaWeights [][]float64
-	for _, l := range net.Weights {
-		nablaWeights = append(
-			nablaWeights,
-			make([]float64, len(l)),
-		)
-	}
-
 	activation := x
 	activations := [][]float64{
 		activation,
 	}
 	var zs [][]float64
 
-	for l, b := range net.Biases {
+	for l, size := range net.Sizes[1:] {
 		w := net.Weights[l]
-		z := make([]float64, len(b))
-
+		z := make([]float64, size)
 		for n := range z {
 			var v float64
 
 			for j, a := range activation {
 				v += a * w[n][j]
 			}
-			v += b[n]
+			v += net.Biases[l][n]
 
 			z[n] = v
 		}
@@ -226,12 +269,12 @@ func (net *Network) Backprop(x []float64, y []float64) ([][][]float64, [][]float
 		activations = append(activations, activation)
 	}
 
-	deltaWeight := net.Weights
-	deltaBiases := net.Biases
+	deltaWeight := zeroWeights(net.Sizes)
+	deltaBiases := zeroBiases(net.Sizes)
 
 	for n, a := range activations[len(activations)-1] {
 		d := (a - y[n]) * a * (1 - a)
-		deltaBiases[len(deltaWeight)-1][n] = d
+		deltaBiases[len(deltaBiases)-1][n] = d
 		for j, a2 := range activations[len(activations)-2] {
 			deltaWeight[len(deltaWeight)-1][n][j] = d * a2
 		}
@@ -240,17 +283,18 @@ func (net *Network) Backprop(x []float64, y []float64) ([][][]float64, [][]float
 	for l := len(deltaWeight) - 2; l >= 0; l-- {
 		dw := deltaWeight[l]
 		for n, weights := range dw {
-			sp := sigmoidPrime(zs[l][n])
+			sp := sigmoidPrime(activations[l+1][n]) // d out / d net
 
-			var e float64
-			for j, w := range deltaWeight[l+1] {
-				e += w[n] * sigmoidPrime(zs[l+1][j])
+			var d float64
+			for m, b := range deltaBiases[l+1] {
+				d += b * deltaWeight[l+1][m][n]
 			}
+			d *= sp
 
-			deltaBiases[l][n] = sp * e
+			deltaBiases[l][n] = d
 
 			for j := range weights {
-				deltaWeight[l][n][j] = deltaBiases[l][n] * activations[l][j]
+				deltaWeight[l][n][j] = d * activations[l][j]
 			}
 		}
 	}
@@ -259,7 +303,7 @@ func (net *Network) Backprop(x []float64, y []float64) ([][][]float64, [][]float
 }
 
 func sigmoidPrime(z float64) float64 {
-	return sigmoid(z) * (1 - sigmoid(z))
+	return z * (1 - z)
 }
 
 func sigmoid(x float64) (s float64) {
@@ -298,10 +342,19 @@ func (m *MNIST) matrixValue() []float64 {
 }
 
 func main() {
-	images, labels := MNISTLoader.LoadTrain("/Users/uffywen/uffy-go/src/mnist_example/data")
+	data := getMNISTs(MNISTLoader.LoadTrain("/Users/uffywen/uffy-go/src/mnist_example/data"))
+	testData := getMNISTs(MNISTLoader.LoadTest("/Users/uffywen/uffy-go/src/mnist_example/data"))
 
+	net := NewNetwork([]int{784, 30, 10})
+	loss := net.TotalLoss(data)
+
+	fmt.Println("current net total lose: ", loss)
+
+	net.OnlineSGD(data, testData, 30, 10, 1)
+}
+
+func getMNISTs(images [][]float64, labels []float64) []MNIST {
 	var data []MNIST
-
 	for n, image := range images {
 		label := labels[n]
 
@@ -316,12 +369,7 @@ func main() {
 		})
 	}
 
-	net := NewNetwork([]int{784, 30, 10})
-	loss := net.TotalLoss(data)
-
-	fmt.Println("current net total lose: ", loss)
-
-	net.SGD(data, 10, 10, 3)
+	return data
 }
 
 func matrixToInt(x []float64) int {

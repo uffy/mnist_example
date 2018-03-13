@@ -202,7 +202,7 @@ func (net *Network) updateMiniBatch(miniBatch []MNIST, eta float64) {
 	}
 	wg.Wait()
 
-	pEta := eta / float64(len(miniBatch));
+	pEta := eta / float64(len(miniBatch))
 	for l1, b1 := range net.Biases {
 		for l2 := range b1 {
 			net.Biases[l1][l2] -= pEta * nablaBiases[l1][l2]
@@ -270,7 +270,7 @@ func (net *Network) Backprop(x []float64, y []float64) ([][][]float64, [][]float
 
 			var d float64
 			for m, b := range deltaBiases[l] {
-				d += b * deltaWeight[l][m][n]
+				d += b * net.Weights[l][m][n]
 			}
 
 			deltaBiases[l-1][n] = d * sp

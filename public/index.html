@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>MNIST</title>
+    <style>
+        #c {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            margin: -140px 0 0 -140px
+        }
+
+        canvas {
+            border: 1px solid black;
+        }
+
+        #canvas2 {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+<div id="c">
+    <canvas id="canvas2" width="28" height="28"></canvas>
+    <canvas id="canvas" width="280" height="280"></canvas>
+    <div id="num"></div>
+</div>
+<script>
+
+    ((canvas, canvas2) => {
+        let ctx = canvas.getContext("2d");
+        let ctx2 = canvas2.getContext("2d");
+
+        let startDraw = false;
+        canvas.addEventListener("mousedown", () => {
+            startDraw = true;
+        });
+        canvas.addEventListener("mousemove", (e) => {
+            if (!startDraw) {
+                return;
+            }
+
+            ctx.beginPath();
+            ctx.arc(e.layerX, e.layerY, 10, 0, 2 * Math.PI);
+            ctx.fill()
+        });
+        canvas.addEventListener("mouseup", () => {
+            startDraw = false;
+        });
+        setInterval(() => {
+            let img = new Image();
+            img.src = canvas.toDataURL();
+            img.crossOrigin = 'anonymous';
+
+            ctx2.clearRect(0, 0, 28, 28);
+            ctx2.drawImage(img, 0, 0, 28, 28);
+
+            let data = [];
+            let cls = false;
+            for (let x = 0; x < 28; x++) {
+                for (let y = 0; y < 28; y++) {
+                    let p = ctx2.getImageData(y, x, 1, 1).data;
+                    let gray = 0.2989 * p[0] + 0.5870 * p[1] + 0.1140 * p[2];
+                    gray = p[3] / 255 * (1 - gray);
+
+                    if (gray > 0) {
+                        cls = true;
+                    }
+
+                    data.push(gray);
+                }
+            }
+
+            if (!cls) {
+                document.getElementById("num").innerHTML = "在画板上写个数字";
+                return;
+            }
+
+            let xhr = new XMLHttpRequest();
+            xhr.onreadystatechange = function () {
+                if (this.readyState === 4 && this.status === 200) {
+                    document.getElementById("num").innerHTML =
+                            this.responseText;
+                }
+            };
+            xhr.open("POST", "/classifier", true);
+            xhr.send("data=" + data.join(","));
+        }, 500);
+    })(document.getElementById("canvas"), document.getElementById("canvas2"));
+</script>
+</body>
+</html>

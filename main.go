@@ -15,7 +15,7 @@ func main() {
 	go classifier.StartTrain()
 	indexHandler := http.FileServer(http.Dir("./public"))
 
-	open("http://localhost:12306")
+	//open("http://localhost:12306")
 	http.ListenAndServe(":12306", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/":

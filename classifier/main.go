@@ -229,10 +229,11 @@ func (net *Network) TotalLoss(batches []MNIST) float64 {
 	var total float64 = 0
 	for _, batch := range batches {
 		value := net.FeedForward(batch.Data)
-		L := MSE(batch.matrixValue(), value)
+		L := CSC(batch.matrixValue(), value)
 		total += L
 	}
-	return total
+
+	return total * -1 / float64(len(batches))
 }
 
 func (net *Network) Backprop(x []float64, y []float64) ([][][]float64, [][]float64) {
@@ -266,7 +267,12 @@ func (net *Network) Backprop(x []float64, y []float64) ([][][]float64, [][]float
 
 	// layer 2, output layer
 	for n, a := range activations[le] {
-		d := (a - y[n]) * a * (1 - a)
+		//CEC
+		d := a - y[n]
+		//d := (a - y[n]) * a
+
+		// MSE
+		//d := (a - y[n]) * a * (1 - a)
 		deltaBiases[le-1][n] = d
 	}
 
@@ -328,6 +334,22 @@ func MSE(a []float64, b []float64) (cost float64) {
 	return
 }
 
+// cross-entropy cost function
+func CSC(a []float64, b []float64) (cost float64) {
+	for n := range a {
+		var v1, v2 float64
+		if b[n] != 0 {
+			v1 = math.Log(b[n]) * a[n]
+		}
+		if b[n] != 1 {
+			v2 = math.Log(1-b[n]) * (1 - a[n])
+		}
+
+		cost += v1 + v2
+	}
+	return
+}
+
 func (m *MNIST) matrixValue() []float64 {
 	v := make([]float64, 10)
 	v[m.Value] = 1
@@ -341,7 +363,7 @@ func StartTrain() {
 	data := toMNIST(MNISTLoader.LoadTrain("/Users/uffywen/uffy-go/src/mnist_example/data"))
 	testData := toMNIST(MNISTLoader.LoadTest("/Users/uffywen/uffy-go/src/mnist_example/data"))
 
-	net.SGD(data, testData, 30, 10, 3)
+	net.SGD(data, testData, 30, 10, 0.5)
 }
 
 func FeedForward(inputs []float64) int {
